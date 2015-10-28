@@ -1,6 +1,6 @@
 (ns excavator.excavator
   (:require [excavator.docker-remote-api :as remote-api]
-            [clojure.core.async :refer [chan close! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]]
+            [clojure.core.async :refer [chan dropping-buffer close! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]]
             [manifold.stream :as s]
             [byte-streams :as bs]
             [excavator.constants :as constants]
@@ -29,10 +29,13 @@
       (bs/to-string)
       (clojure.string/replace #"\n" "")))
 
-(defn call-a-monster! []
-  (let [{:keys [excavator-host-port]
-         :or {excavator-host-port 9081}} env
-        api-key @state/api-key
+
+;SCHEDULER EVENTS
+;=====================================
+(defn call-a-monster! [{:keys [src]}]
+  (let [{:keys [excavator-host-port api-key]
+         :or {excavator-host-port 9081
+              api-key @state/api-key}} env
         public-ip (get-external-public-ip!)
         call-success?
         (ws-client/one-off-message
@@ -42,14 +45,50 @@
           {:event-name :call-a-monster
            :data       {:excavator-public-ip-address public-ip
                         :excavator-port              excavator-host-port
-                        :api-key                     api-key}})]
+                        :api-key                     api-key
+                        :src                         src}})]
     ;docker run -d -v /var/run/docker.sock:/var/run/docker.sock -p 9081:8081 -e "EXCAVATOR_HOST_PORT=9081" rangelspasov/excavator
     (if-not (nil? call-success?) (println "CALLED MONSTER OK") (println "FAILED TO CALL A MONSTER"))
     true))
 
+(defn update-containers-state! [containers-state]
+  (let [;ENV
+        {:keys [excavator-host-port container-source api-key]
+         :or {excavator-host-port 9081
+              api-key @state/api-key}}
+        env
+        ;SRC
+        src container-source
+        ;make request
+        result
+        (ws-client/one-off-message
+          {:user-uuid "excavator-user"
+           :api-key   api-key
+           :host      constants/main-endpoint}
+          {:event-name :update-containers-state
+           :data       {:api-key                     api-key
+                        :src                         src
+                        :containers-state containers-state}})]
+    result))
+
+
+(def call-a-monster-ch (chan (dropping-buffer 1)))
+
+(defn start-call-a-monster-loop
+  "Calls a monster at most once per 10 seconds"
+  []
+  (thread
+    (loop []
+      (let [data (<!! call-a-monster-ch)]
+        (try
+          (call-a-monster! data)
+          (catch Exception e e))
+        (<!! (timeout 10000))
+        (recur)))))
+
 (defn start-container-log-streaming
   "Starts log streaming for a specific container-id"
-  [docker-client ^Atom containers {container-id :id container-name :name :as new-live-container}]
+  [docker-client ^Atom containers {image :image container-id :id container-name :name :as new-live-container}]
   (let [^LogStream log-stream (remote-api/logs docker-client container-id)
         log-stream-source (s/->source log-stream)
         monster-user constants/monster-user
@@ -58,7 +97,8 @@
         _ (s/connect log-stream-source chan-sink)
         ;get a random socket for the monster user
         random-socket
-        (state/get-random-socket constants/monster-user)]
+        (state/get-random-socket constants/monster-user)
+        {:keys [container-source]} env]
     ;start async loop
     (go-loop [prev-result :no-prev-result
               {:keys [stream-out-ch] :as a-socket} random-socket]
@@ -76,6 +116,9 @@
                        event-bytes
                        (create-event->bytes :stream-log-entry {:log-entry
                                                                {:container-name container-name
+                                                                :container-id   container-id
+                                                                :image-name     image
+                                                                :src            container-source
                                                                 :log-line       log-line}})]
                    ;send the event if stream-out-ch is available
                    (if stream-out-ch
@@ -89,12 +132,12 @@
                          false (recur result (state/get-random-socket monster-user))
                          ;channel is full, call a monster
                          :channel-full (do (println ":channel-full, call a monster")
-                                           (call-a-monster!)
+                                           (>! call-a-monster-ch {:src container-source})
                                            (<! (timeout 1000))
                                            (recur result (state/get-random-socket monster-user)))))
                      ;no stream-out-ch, no monsters connected
                      (do (println "no stream-out-ch, call a monster")
-                         (call-a-monster!)
+                         (>! call-a-monster-ch {:src container-source})
                          (<! (timeout 1000))
                          (recur result (state/get-random-socket monster-user)))))
                  ;else, closed
@@ -115,17 +158,20 @@
             old-live-containers' @live-containers
 
             new-live-containers (clojure.set/difference current-live-containers old-live-containers')]
-        ;START STREAMING new containers
-        (doseq [{:keys [name id] :as new-live-container} new-live-containers]
-          ;save in atom
-          (swap! live-containers (fn [^IPersistentSet x] (conj x new-live-container)))
-          (println "starting streaming for container:: " name id)
-          (if-not (or (.startsWith name "ecs-agent")
-                      (.startsWith name "ecs-monster")
-                      (.startsWith name "ecs-excavator"))
-            (thread
-              (start-container-log-streaming @docker-client live-containers new-live-container))
-            (println "SKIPPING::" name)))
+        (when (< 0 (count new-live-containers))
+          ;START STREAMING NEW CONTAINERS
+          (doseq [{:keys [name id] :as new-live-container} new-live-containers]
+            ;save in atom
+            (swap! live-containers (fn [^IPersistentSet x] (conj x new-live-container)))
+            (println "starting streaming for container:: " name id)
+            (if-not (or (.startsWith name "ecs-agent")
+                        (.startsWith name "ecs-monster")
+                        (.startsWith name "ecs-excavator"))
+              (thread
+                (start-container-log-streaming @docker-client live-containers new-live-container))
+              (println "SKIPPING::" name)))
+          ;UPDATE CONTAINER LIST
+          (update-containers-state! current-live-containers))
         ;wait
         (<!! (timeout 5000))
         (recur)))))
@@ -146,4 +192,5 @@
 (defn init []
   (remote-api/create-client)
   (update-live-containers-loop remote-api/docker-client live-containers)
-  (start-ping-loop remote-api/docker-client))
+  (start-ping-loop remote-api/docker-client)
+  (start-call-a-monster-loop))

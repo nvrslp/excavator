@@ -25,7 +25,7 @@
     (condp = event-name
       ;heartbeat
       :heartbeat {}
-      ;else,nothingh
+      ;else,nothing
       {})
     (catch Exception e e)))
 

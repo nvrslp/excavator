@@ -43,10 +43,6 @@
 (defn list-containers [^DockerClient c]
   (.listContainers c (into-array [(DockerClient$ListContainersParam/allContainers false)])))
 
-(defn get-container-id
-  [^Container c]
-  (.id c))
-
 (defn get-container-name
   [^Container c]
   (subs (first (.names c)) 1))
@@ -54,7 +50,8 @@
 (defn get-container-info [^Container c]
   {:name (get-container-name c)
    :created (.created c)
-   :id   (get-container-id c)})
+   :image (.image c)
+   :id   (.id c)})
 
 
 (defn log-message-content [^LogMessage lm]

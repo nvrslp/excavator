@@ -1,6 +1,6 @@
 (ns excavator.state
   (:require [clojure.core.incubator :refer [dissoc-in]]
-            [clojure.core.async :refer [chan close! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]]
+            [clojure.core.async :refer [chan dropping-buffer close! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]]
             [excavator.util :as util]))
 
 
@@ -76,3 +76,4 @@
           (instance? util/byte-array-class string-or-byte-array))
     (doseq [{:keys [stream-out-ch]} (vals (get @uuid-sockets uuid))]
       (>!! stream-out-ch string-or-byte-array))))
+
