@@ -1,5 +1,6 @@
 (ns excavator.util
   (:require [cognitect.transit :as transit]
+            [clojure.core.async :refer [chan dropping-buffer close! offer! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]]
             [base64-clj.core :as base64])
   (:import (java.io ByteArrayInputStream ByteArrayOutputStream PrintWriter StringWriter)))
 
@@ -45,3 +46,16 @@
         pw (PrintWriter. sw)]
     (.printStackTrace e pw)
     (.toString sw)))
+
+(defn create-in-order-loop
+  "Creates a loop that executes functions in order"
+  []
+  (let [a-chan (chan)]
+    (go
+      (loop []
+        (let [f (<! a-chan)]
+          (try
+            (let [result (<! (thread (f)))])
+            (catch Exception e e))
+          (recur))))
+    a-chan))

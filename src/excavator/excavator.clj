@@ -1,6 +1,6 @@
 (ns excavator.excavator
   (:require [excavator.docker-remote-api :as remote-api]
-            [clojure.core.async :refer [chan dropping-buffer close! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]]
+            [clojure.core.async :refer [chan dropping-buffer close! offer! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]]
             [manifold.stream :as s]
             [byte-streams :as bs]
             [excavator.constants :as constants]
@@ -15,6 +15,9 @@
 
 
 (declare init)
+
+(defn build-endpoint [ip-address port]
+  (str "ws://" ip-address ":" port "/"))
 
 (def live-containers (atom #{}))
 
@@ -37,7 +40,7 @@
          :or {excavator-host-port 9081
               api-key @state/api-key}} env
         public-ip (get-external-public-ip!)
-        call-success?
+        {:keys [data] :as event-response}
         (ws-client/one-off-message
           {:user-uuid "excavator-user"
            :api-key   api-key
@@ -47,8 +50,20 @@
                         :excavator-port              excavator-host-port
                         :api-key                     api-key
                         :src                         src}})]
-    ;docker run -d -v /var/run/docker.sock:/var/run/docker.sock -p 9081:8081 -e "EXCAVATOR_HOST_PORT=9081" rangelspasov/excavator
-    (if-not (nil? call-success?) (println "CALLED MONSTER OK") (println "FAILED TO CALL A MONSTER"))
+    ;docker run -d -v /var/run/docker.sock:/var/run/docker.sock -p 9081:8081 -e "EXCAVATOR_HOST_PORT=9081" -e "API_KEY=your-api-key" rangelspasov/excavator
+    (if-not (nil? event-response)
+      (let [{:keys [monster]} data
+            {:keys [public-ip-address port]} monster]
+        (println "CALLED MONSTER OK")
+        ;connect to a monster
+        (ws-client/init-connection-with-heartbeat
+          {:user-uuid "excavator-user-stream"
+           :api-key api-key
+           :host      (build-endpoint public-ip-address port)}
+          ;don't care for server messages
+          (chan (dropping-buffer 1))))
+
+      (println "FAILED TO CALL A MONSTER"))
     true))
 
 (defn update-containers-state! [containers-state]
@@ -91,13 +106,12 @@
   [docker-client ^Atom containers {image :image container-id :id container-name :name :as new-live-container}]
   (let [^LogStream log-stream (remote-api/logs docker-client container-id)
         log-stream-source (s/->source log-stream)
-        monster-user constants/monster-user
         a-chan (chan 1024)
         chan-sink (s/->sink a-chan)
         _ (s/connect log-stream-source chan-sink)
         ;get a random socket for the monster user
         random-socket
-        (state/get-random-socket constants/monster-user)
+        (ws-client/get-random-socket)
         {:keys [container-source]} env]
     ;start async loop
     (go-loop [prev-result :no-prev-result
@@ -123,23 +137,23 @@
                    ;send the event if stream-out-ch is available
                    (if stream-out-ch
                      ;try to put on the stream-out-ch
-                     (let [[result-val a-chan] (alts! [[stream-out-ch event-bytes]] :default :channel-full)]
+                     (let [result-val (offer! stream-out-ch event-bytes)]
                        ;result-val - true, false or :channel-full
                        (condp = result-val
                          ;looks OK, proceed
                          true (recur :no-prev-result a-socket)
                          ;stream-out-ch closed, retry
-                         false (recur result (state/get-random-socket monster-user))
+                         false (recur result (ws-client/get-random-socket))
                          ;channel is full, call a monster
-                         :channel-full (do (println ":channel-full, call a monster")
+                         nil (do (println ":channel-full, call a monster")
                                            (>! call-a-monster-ch {:src container-source})
                                            (<! (timeout 1000))
-                                           (recur result (state/get-random-socket monster-user)))))
+                                           (recur result (ws-client/get-random-socket)))))
                      ;no stream-out-ch, no monsters connected
                      (do (println "no stream-out-ch, call a monster")
                          (>! call-a-monster-ch {:src container-source})
                          (<! (timeout 1000))
-                         (recur result (state/get-random-socket monster-user)))))
+                         (recur result (ws-client/get-random-socket)))))
                  ;else, closed
                  (do
                    (println "channel closed, bye")

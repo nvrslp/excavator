@@ -1,6 +1,6 @@
 (ns excavator.web-socket-client
   (:require [manifold.stream :as s]
-            [clojure.core.async :refer [chan close! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]]
+            [clojure.core.async :refer [chan offer! close! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]]
             [clojure.core.async.impl.protocols :refer [closed?]]
             [aleph.http :as http]
             [excavator.util :as util])
@@ -8,6 +8,35 @@
 
 
 (declare init-persistent-connection)
+
+
+;STATE
+;=============================
+(defonce in-order-ch (atom nil))
+
+(defonce ws-clients (atom {}))
+
+(defn add-ws-client [host ws-conn]
+  (swap! ws-clients assoc host ws-conn))
+
+(defn get-ws-client [host]
+  (get @ws-clients host))
+
+(defn remove-ws-client [host]
+  (swap! ws-clients dissoc host))
+
+(defn get-random-socket
+  "Return a random {:stream-in-ch (chan) :stream-out-ch (chan)}"
+  []
+  (let [key-vals
+        (->> @ws-clients
+             (vals)
+             (into []))]
+    (if-not (empty? key-vals)
+      (rand-nth key-vals)
+      nil)))
+
+;=============================
 
 (defn ws-client-instance [{:keys [user-uuid api-key host]
                            :or   {host "ws://localhost:8081/"
@@ -21,8 +50,8 @@
       ;return exception
       s
       ;else, ok
-      (let [stream-in-ch (chan 1024)
-            stream-out-ch (chan 1024)]
+      (let [stream-in-ch (chan 10)
+            stream-out-ch (chan 10)]
         (s/connect s stream-in-ch)
         (s/connect stream-out-ch s)
         {:stream-in-ch  stream-in-ch
@@ -68,3 +97,64 @@
       ;couldn't connect
       nil)))
 
+(defn start-ws-heartbeat-loop [{:keys [stream-in-ch stream-out-ch] :as ws-instance}]
+  (go-loop []
+    (let [_ (println "[HEARTBEAT] request...")
+          offer-result (offer! stream-out-ch (util/data-to-transit {:event-name :heartbeat :data {}}))]
+      ;when offer-result is not false, stream-out-ch seems to be open, continue sending heartbeats
+      (when-not (= false offer-result)
+        (<! (timeout 5000))
+        (recur)))))
+
+(defn start-ws-server-triggered-loop
+  [{:keys [stream-in-ch stream-out-ch host] :as ws-instance} ^ManyToManyChannel output-ch]
+  (go-loop []
+    ;block here
+    (let [[transit-data _] (alts! [stream-in-ch (timeout 10000)])]
+      (if (nil? transit-data)
+        ;got nil, stream-in-ch read timed out, going to close connection
+        (do
+          (close-connection ws-instance)
+          (remove-ws-client host)
+          nil)
+        ;else
+        (let [{:keys [event-name] :as data} (util/transit-to-data transit-data)]
+          (println "[HEARTBEAT] got heartbeat response")
+          ;if not a heartbeat, put it on the output-ch
+          (when-not (= :heartbeat event-name)
+            (>! output-ch data))
+          (recur))))))
+
+
+(defn init-connection-with-heartbeat
+  "Initiates a websocket connection with a heartbeat;
+   All incoming messages will be put onto the output-ch
+   :singleton-connection? - should we only have one connection to a host (default: true)"
+  [{:keys [user-uuid host api-key]
+    :or   {host "ws://localhost:8081/"
+           api-key "na"}
+    :as data}
+   ^ManyToManyChannel output-ch]
+  (println "goint to connect to ws::" data)
+  (let [in-order-ch @in-order-ch]
+    (>!! in-order-ch
+         (fn []
+           (let [ws-conn (get-ws-client host)]
+             (if (nil? ws-conn)
+               ;new ws-conn
+               (let [ws-conn (ws-client-instance {:user-uuid user-uuid :host host :api-key api-key})]
+                 (when-not (instance? Throwable ws-conn)
+                   (start-ws-heartbeat-loop ws-conn)
+                   (start-ws-server-triggered-loop ws-conn output-ch)
+                   (add-ws-client host ws-conn))
+                 ws-conn)
+               ;return existing ws-conn
+               ws-conn))))))
+
+
+(defn init-in-order-ch []
+  (let [c (util/create-in-order-loop)]
+    (reset! in-order-ch c)))
+
+(defn init []
+  (init-in-order-ch))
