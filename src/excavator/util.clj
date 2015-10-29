@@ -1,7 +1,6 @@
 (ns excavator.util
   (:require [cognitect.transit :as transit]
-            [clojure.core.async :refer [chan dropping-buffer close! offer! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]]
-            [base64-clj.core :as base64])
+            [clojure.core.async :refer [chan dropping-buffer close! offer! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]])
   (:import (java.io ByteArrayInputStream ByteArrayOutputStream PrintWriter StringWriter)))
 
 (def byte-array-class (class (byte-array 0)))
@@ -20,25 +19,6 @@
         reader (transit/reader in :json)]
     (transit/read reader)))
 
-
-(defn base64-ws-sanitized->base64 [s]
-  (-> s
-      (clojure.string/replace #"_" "=")
-      (clojure.string/replace #"PLUS" "+")
-      (clojure.string/replace #"SLASH" "/")))
-
-(defn base64-decode [s]
-  (base64/decode s))
-
-(defn base64-encode [s]
-  (base64/encode s))
-
-
-(defn decode-websocket-auth-data [string-data]
-  (-> string-data
-      (base64-ws-sanitized->base64)
-      (base64-decode)
-      (transit-to-data)))
 
 
 (defn stack-trace-as-string [^Exception e]

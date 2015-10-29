@@ -26,31 +26,24 @@
     {:event-name event-name
      :data       data}))
 
-(defn get-external-public-ip! []
-  (-> @(aleph-http/get "http://checkip.amazonaws.com/")
-      :body
-      (bs/to-string)
-      (clojure.string/replace #"\n" "")))
+
 
 
 ;SCHEDULER EVENTS
 ;=====================================
 (defn call-a-monster! [{:keys [src]}]
-  (let [{:keys [excavator-host-port api-key]
-         :or {excavator-host-port 9081
-              api-key @state/api-key}} env
-        public-ip (get-external-public-ip!)
+  (let [{:keys [api-key]
+         :or {api-key @state/api-key}} env
+
         {:keys [data] :as event-response}
         (ws-client/one-off-message
           {:user-uuid "excavator-user"
            :api-key   api-key
            :host      constants/main-endpoint}
           {:event-name :call-a-monster
-           :data       {:excavator-public-ip-address public-ip
-                        :excavator-port              excavator-host-port
-                        :api-key                     api-key
+           :data       {:api-key                     api-key
                         :src                         src}})]
-    ;docker run -d -v /var/run/docker.sock:/var/run/docker.sock -p 9081:8081 -e "EXCAVATOR_HOST_PORT=9081" -e "API_KEY=your-api-key" rangelspasov/excavator
+    ;docker run -d -v /var/run/docker.sock:/var/run/docker.sock -e "API_KEY=your-api-key" rangelspasov/excavator
     (if-not (nil? event-response)
       (let [{:keys [monster]} data
             {:keys [public-ip-address port]} monster]

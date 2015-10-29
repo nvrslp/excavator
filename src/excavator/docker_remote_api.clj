@@ -1,6 +1,6 @@
 (ns excavator.docker-remote-api
-  (:import (com.spotify.docker.client DockerClient DefaultDockerClient LogStream LogMessage DockerClient$ListContainersParam DockerClient$LogsParam)
-           (com.spotify.docker.client.messages ContainerInfo Container ContainerStats MemoryStats)
+  (:import (com.spotify.docker.client DockerClient DefaultDockerClient LogMessage DockerClient$ListContainersParam DockerClient$LogsParam)
+           (com.spotify.docker.client.messages Container)
            (java.nio HeapByteBufferR CharBuffer)
            (java.nio.charset StandardCharsets)))
 
@@ -11,27 +11,6 @@
 (defn create-client []
   (reset! docker-client
           (DefaultDockerClient. "unix:///var/run/docker.sock")))
-
-(defn create-temp-client []
-  (DefaultDockerClient. "unix:///var/run/docker.sock"))
-
-(defn inspect-container [^DockerClient c ^String container-id]
-  (.inspectContainer c container-id))
-
-(defn container-info->clj-data [^ContainerInfo container-info]
-  (.created container-info))
-
-(defn stats [^DockerClient c ^String container-id]
-  (.stats c container-id))
-
-(defn get-stats-info [^ContainerStats s]
-  (.memoryStats s))
-
-(defn get-memory-stats-info [^MemoryStats ms]
-  (.usage ms))
-
-(defn get-max-memory-usage[^MemoryStats ms]
-  (.maxUsage ms))
 
 
 (defn logs [^DockerClient c ^String container-id]
