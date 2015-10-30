@@ -50,8 +50,8 @@
       ;return exception
       s
       ;else, ok
-      (let [stream-in-ch (chan 10)
-            stream-out-ch (chan 10)]
+      (let [stream-in-ch (chan 1024)
+            stream-out-ch (chan 1024)]
         (s/connect s stream-in-ch)
         (s/connect stream-out-ch s)
         {:stream-in-ch  stream-in-ch
@@ -65,7 +65,7 @@
 
 
 (defn receive-message [{:keys [stream-in-ch stream-out-ch] :as ws-instance}]
-  (let [data (<!! stream-in-ch)]
+  (let [[data _] (alts!! [stream-in-ch (timeout 20000)])]
     (if-not (nil? data)
       (util/transit-to-data data)
       nil)))

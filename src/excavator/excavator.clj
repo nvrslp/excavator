@@ -43,7 +43,7 @@
           {:event-name :call-a-monster
            :data       {:api-key                     api-key
                         :src                         src}})]
-    ;docker run -d -v /var/run/docker.sock:/var/run/docker.sock -e "API_KEY=your-api-key" rangelspasov/excavator
+    ;docker run -d -v /var/run/docker.sock:/var/run/docker.sock -e "API_KEY=your-api-key" neversleep/excavator
     (if-not (nil? event-response)
       (let [{:keys [monster]} data
             {:keys [public-ip-address port]} monster]
@@ -140,7 +140,7 @@
                          ;channel is full, call a monster
                          nil (do (println ":channel-full, call a monster")
                                            (>! call-a-monster-ch {:src container-source})
-                                           (<! (timeout 1000))
+                                           (<! (timeout 100))
                                            (recur result (ws-client/get-random-socket)))))
                      ;no stream-out-ch, no monsters connected
                      (do (println "no stream-out-ch, call a monster")
