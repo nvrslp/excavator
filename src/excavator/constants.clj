@@ -1,3 +1,3 @@
 (ns excavator.constants)
 
-(def main-endpoint "wss://scheduler.cloudmonkey.io/")
+(def main-endpoint "wss://scheduler.neversleep.io/")

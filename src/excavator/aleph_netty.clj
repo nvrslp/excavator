@@ -29,11 +29,10 @@
          :req           req}))
     ;else, HTTP
     (do
-      (clojure.pprint/pprint req)
       {:status 200
        :body "got http?"})))
 
 (defn start-server
   "Starts WebSocket server"
   []
-  (reset! state/ws-server (http/start-server ws-handler {:port 8081})))
+  (reset! state/ws-server (http/start-server ws-handler {:port 8082})))

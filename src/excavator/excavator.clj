@@ -32,8 +32,7 @@
 ;SCHEDULER EVENTS
 ;=====================================
 (defn call-a-monster! [{:keys [src]}]
-  (let [{:keys [api-key]
-         :or {api-key @state/api-key}} env
+  (let [{:keys [api-key]} env
 
         {:keys [data] :as event-response}
         (ws-client/one-off-message
@@ -61,10 +60,7 @@
 
 (defn update-containers-state! [containers-state]
   (let [;ENV
-        {:keys [excavator-host-port container-source api-key]
-         :or {excavator-host-port 9081
-              api-key @state/api-key}}
-        env
+        {:keys [container-source api-key]} env
         ;SRC
         src container-source
         ;make request
@@ -77,6 +73,20 @@
            :data       {:api-key                     api-key
                         :src                         src
                         :containers-state containers-state}})]
+    result))
+
+(defn register-excavator! [{:keys [excavator-uuid]}]
+  (let [{:keys [api-key container-source]} env
+
+        result
+        (ws-client/one-off-message
+          {:user-uuid "excavator-user"
+           :api-key   api-key
+           :host      constants/main-endpoint}
+          {:event-name :register-excavator
+           :data       {:api-key        api-key
+                        :src            container-source
+                        :excavator-uuid excavator-uuid}})]
     result))
 
 
@@ -94,8 +104,32 @@
         (<!! (timeout 10000))
         (recur)))))
 
+(defn start-uptime-loop
+  "Reports uptime to the scheduler once per 60 seconds"
+  [{:keys [excavator-uuid]}]
+  (let [{:keys [api-key container-source]} env]
+    (thread
+      (loop []
+        (<!! (timeout 60000))
+        (let [result
+              (ws-client/one-off-message
+                {:user-uuid "excavator-user"
+                 :api-key   api-key
+                 :host      constants/main-endpoint}
+                {:event-name :report-uptime
+                 :data       {:api-key        api-key
+                              :src            container-source
+                              :excavator-uuid excavator-uuid}})]
+          (if-not (nil? result)
+            (println "[INFO] Uptime reported OK")
+            (println "[WARN] Could not report uptime to scheduler"))
+          (recur))))))
+
 (defn start-container-log-streaming
-  "Starts log streaming for a specific container-id"
+  "Starts log streaming for a specific container-id;
+   The start-container-log-streaming loop picks a socket and continues to write
+   to it until offer! returns non-true value (false - full, nil - socket closed).
+   We do this so that logs are less likely to become out of order."
   [docker-client ^Atom containers {image :image container-id :id container-name :name :as new-live-container}]
   (let [^LogStream log-stream (remote-api/logs docker-client container-id)
         log-stream-source (s/->source log-stream)
@@ -137,19 +171,19 @@
                          true (recur :no-prev-result a-socket)
                          ;stream-out-ch closed, retry
                          false (recur result (ws-client/get-random-socket))
-                         ;channel is full, call a monster
-                         nil (do (println ":channel-full, call a monster")
+                         ;socket channel is full, call a monster
+                         nil (do (println "[INFO] Full stream-out-ch, going to call a monster")
                                            (>! call-a-monster-ch {:src container-source})
                                            (<! (timeout 100))
                                            (recur result (ws-client/get-random-socket)))))
                      ;no stream-out-ch, no monsters connected
-                     (do (println "no stream-out-ch, call a monster")
+                     (do (println "[INFO] No stream-out-ch, going to call a monster")
                          (>! call-a-monster-ch {:src container-source})
                          (<! (timeout 1000))
                          (recur result (ws-client/get-random-socket)))))
                  ;else, closed
                  (do
-                   (println "channel closed, bye")
+                   (println "[INFO] Container channel closed, bye")
                    ;remove from atom
                    (swap! containers (fn [x] (disj x new-live-container)))
                    :channel-closed))))))
@@ -170,34 +204,33 @@
           (doseq [{:keys [name id] :as new-live-container} new-live-containers]
             ;save in atom
             (swap! live-containers (fn [^IPersistentSet x] (conj x new-live-container)))
-            (println "starting streaming for container:: " name id)
+            (println "[INFO] Starting streaming for container" name id)
             (if-not (or (.startsWith name "ecs-agent")
                         (.startsWith name "ecs-monster")
                         (.startsWith name "ecs-excavator"))
               (thread
                 (start-container-log-streaming @docker-client live-containers new-live-container))
-              (println "SKIPPING::" name)))
+              (println "[INFO] Skipping " name)))
           ;UPDATE CONTAINER LIST
           (update-containers-state! current-live-containers))
         ;wait
         (<!! (timeout 5000))
         (recur)))))
 
-(defn start-ping-loop [^Atom docker-client]
-  (thread
-    (loop []
-      ;wait
-      (<!! (timeout 5000))
-      (let [ping-result
-            (try
-              (.ping ^DockerClient @docker-client)
-              (catch Exception e e))]
-        (if (= "OK" ping-result)
-          (recur)
-          (init))))))
+
+(defn get-docker-version []
+  )
 
 (defn init []
-  (remote-api/create-client)
-  (update-live-containers-loop remote-api/docker-client live-containers)
-  (start-ping-loop remote-api/docker-client)
-  (start-call-a-monster-loop))
+  (let [excavator-uuid (state/generate-excavator-uuid)]
+    ;continuously check for new containers
+    (update-live-containers-loop remote-api/docker-client live-containers)
+
+    ;loop that controls the rate at which we call monsters
+    (start-call-a-monster-loop)
+
+    ;register the excavator at launch
+    (register-excavator! {:excavator-uuid excavator-uuid})
+
+    ;report uptime
+    (start-uptime-loop {:excavator-uuid excavator-uuid})))

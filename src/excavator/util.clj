@@ -1,9 +1,8 @@
 (ns excavator.util
   (:require [cognitect.transit :as transit]
             [clojure.core.async :refer [chan dropping-buffer close! offer! go >! <! <!! >!! go-loop put! thread alts! alts!! timeout pipeline pipeline-blocking pipeline-async]])
-  (:import (java.io ByteArrayInputStream ByteArrayOutputStream PrintWriter StringWriter)))
-
-(def byte-array-class (class (byte-array 0)))
+  (:import (java.io ByteArrayInputStream ByteArrayOutputStream PrintWriter StringWriter)
+           (java.util UUID)))
 
 (defn data-to-transit [data]
   (let [out (ByteArrayOutputStream. 4096)
@@ -19,6 +18,7 @@
         reader (transit/reader in :json)]
     (transit/read reader)))
 
+(defn random-uuid-str [] (str (UUID/randomUUID)))
 
 
 (defn stack-trace-as-string [^Exception e]
@@ -39,3 +39,14 @@
             (catch Exception e e))
           (recur))))
     a-chan))
+
+
+(defn parse-double [s]
+  (if (number? s)
+    s
+    (Double/parseDouble s)))
+
+(defn safe-parse-double [s default]
+  (try
+    (parse-double s)
+    (catch Exception e default)))

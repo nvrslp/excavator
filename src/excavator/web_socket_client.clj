@@ -48,7 +48,10 @@
                (catch Exception e e))]
     (if (instance? Throwable s)
       ;return exception
-      s
+      (do
+        (println "got exception while trying to connect::")
+        (clojure.pprint/pprint s)
+        s)
       ;else, ok
       (let [stream-in-ch (chan 1024)
             stream-out-ch (chan 1024)]
@@ -99,7 +102,7 @@
 
 (defn start-ws-heartbeat-loop [{:keys [stream-in-ch stream-out-ch] :as ws-instance}]
   (go-loop []
-    (let [_ (println "[HEARTBEAT] request...")
+    (let [_ (println "[INFO] heartbeat request...")
           offer-result (offer! stream-out-ch (util/data-to-transit {:event-name :heartbeat :data {}}))]
       ;when offer-result is not false, stream-out-ch seems to be open, continue sending heartbeats
       (when-not (= false offer-result)
@@ -119,7 +122,7 @@
           nil)
         ;else
         (let [{:keys [event-name] :as data} (util/transit-to-data transit-data)]
-          (println "[HEARTBEAT] got heartbeat response")
+          (println "[INFO] got heartbeat response")
           ;if not a heartbeat, put it on the output-ch
           (when-not (= :heartbeat event-name)
             (>! output-ch data))
@@ -135,7 +138,7 @@
            api-key "na"}
     :as data}
    ^ManyToManyChannel output-ch]
-  (println "goint to connect to ws::" data)
+  (println "[INFO] goint to connect to websocket" data)
   (let [in-order-ch @in-order-ch]
     (>!! in-order-ch
          (fn []

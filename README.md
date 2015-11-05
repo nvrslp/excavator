@@ -1,37 +1,18 @@
-# excavator
+# Excavator
 
-FIXME: description
+View and search your Docker container logs from STDOUT.
 
 ## Installation
 
-Download from http://example.com/FIXME.
+1. Obtain an API key at https://neversleep.io . 
 
-## Usage
+2. Run this on any Docker-capable host (Docker 1.8+ only):
 
-FIXME: explanation
 
-    $ java -jar excavator-0.1.0-standalone.jar [args]
+    $ docker run -d -v /var/run/docker.sock:/var/run/docker.sock -e "API_KEY=your-api-key" neversleep/excavator
 
-## Options
 
-FIXME: listing of options this app accepts.
+Copyright © 2015 NeverSleep
 
-## Examples
+Distributed under the Eclipse Public License.
 
-...
-
-### Bugs
-
-...
-
-### Any Other Sections
-### That You Think
-### Might be Useful
-
-## License
-
-Copyright © 2015 FIXME
-
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
-# excavator
