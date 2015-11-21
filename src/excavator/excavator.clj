@@ -17,7 +17,7 @@
 (declare init)
 
 (defn build-endpoint [ip-address port]
-  (str "ws://" ip-address ":" port "/"))
+  (str "wss://" ip-address ":" port "/"))
 
 (def live-containers (atom #{}))
 
@@ -46,7 +46,7 @@
     (if-not (nil? event-response)
       (let [{:keys [monster]} data
             {:keys [public-ip-address port]} monster]
-        (println "CALLED MONSTER OK")
+        (println "[INFO] CALLED MONSTER OK")
         ;connect to a monster
         (ws-client/init-connection-with-heartbeat
           {:user-uuid "excavator-user-stream"
@@ -55,7 +55,7 @@
           ;don't care for server messages
           (chan (dropping-buffer 1))))
 
-      (println "FAILED TO CALL A MONSTER"))
+      (println "[INFO] FAILED TO CALL A MONSTER"))
     true))
 
 (defn update-containers-state! [containers-state]

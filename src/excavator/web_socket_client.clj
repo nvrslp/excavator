@@ -41,6 +41,8 @@
 (defn ws-client-instance [{:keys [user-uuid api-key host]
                            :or   {host "ws://localhost:8081/"
                                   api-key "na"}}]
+
+  (println "[INFO] going to connect to::" host)
   (let [s (try @(http/websocket-client
                   host
                   {:headers {:user-uuid user-uuid
@@ -146,6 +148,8 @@
              (if (nil? ws-conn)
                ;new ws-conn
                (let [ws-conn (ws-client-instance {:user-uuid user-uuid :host host :api-key api-key})]
+
+                 (println "[INFO] connection result::" ws-conn)
                  (when-not (instance? Throwable ws-conn)
                    (start-ws-heartbeat-loop ws-conn)
                    (start-ws-server-triggered-loop ws-conn output-ch)
