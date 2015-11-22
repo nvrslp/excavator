@@ -10,7 +10,7 @@ View and search your Docker container logs.
 
 
 
-    $ docker run -d -v /var/run/docker.sock:/var/run/docker.sock -e "API_KEY=your-api-key" neversleep/excavator:0.8.0
+    $ docker run -d -v /var/run/docker.sock:/var/run/docker.sock -e "API_KEY=your-api-key" neversleep/excavator:0.8.1
 
 
 Copyright © 2015 NeverSleep

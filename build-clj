@@ -1,4 +1,4 @@
 #!/bin/bash
 lein uberjar
 docker build -t neversleep/excavator:0.8.1 .
-#docker push neversleep/excavator:0.8.1
+docker push neversleep/excavator:0.8.1
